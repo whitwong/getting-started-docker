@@ -47,9 +47,9 @@ An image does not exist locally with the tag: <dockerNamespace>/getting-started-
 
 
 ## Helpful commands
-List docker images on machine: `docker images` or `docker image ls`
-List docker containers/processes: `docker ps` and `docker ps -a`
-Start image/container: `docker start <image name>` or `docker start <container id>`
-Stop image/container: `docker stop <image name>` or `docker stop <container id>`
-Delete container: `docker rm <container id>`
-Stop and remove container in one command: `docker rm -f <container id>`
+* List docker images on machine: `docker images` or `docker image ls`
+* List docker containers/processes: `docker ps` and `docker ps -a`
+* Start image/container: `docker start <image name>` or `docker start <container id>`
+* Stop image/container: `docker stop <image name>` or `docker stop <container id>`
+* Delete container: `docker rm <container id>`
+* Stop and remove container in one command: `docker rm -f <container id>`
