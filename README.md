@@ -3,13 +3,13 @@
 Source: https://docs.docker.com/get-started/
 
 ## Tutorial Step-by-step
-### Initial application setup
+### <ins>Initial application setup
 1. Copied `/app` directory from https://github.com/docker/getting-started/tree/master/app into personal repo.
 1. Created `Dockerfile` into the `/app` directory. Added docker commands to `Dockerfile`.
 1. cd into the `/app` directory and run the following command: `docker build -t getting-started-docker . `. This builds the docker container image using a tag name of `getting-started-docker` in the current directory (which is `/app`).
 1. Start the app container! Use the following command: `docker run -dp 3000:3000 getting-started-docker`. The whole command says run the docker container `getting-started-docker` (tag name stated in the build command) using the flag designations. The `-dp` flags designate running the container in "detached" mode and create a "port" mapping from the host's port 3000 to the container's port 3000. The output after running this command is a sha (Secure Hash Algorithm) value.
 
-### Update the application
+### <ins>Update the application
 1. After making changes, run the same build command. If you try to run/start the container immediately, you'll hit an error regarding a port already in use/allocated. This indicates that the old container is still running, and the error stems from the new container trying to use the host's port 3000 when only one process on the machine can listen to a specific port at one time. So how do we fix this?
 1. Stop the old container and then remove it. Don't need to remove container after stopping it, but it's good practice.
 1. Identify the running container you want to stop: `docker ps`
@@ -17,7 +17,7 @@ Source: https://docs.docker.com/get-started/
 1. After the container stops (you can verify using `docker ps -a`), remove the container: `docker rm <container id>`
 1. Bonus: You can stop and remove container at one time using the force flag `docker rm -f <container id>`
 
-### Share the application
+### <ins>Share the application
 #### Create a repo
 1. Create a repository on [Docker Hub](hub.docker.com).
 1. Name the repo (nameed this one `getting-started-docker`) and make sure visibility is `Public`.
@@ -42,7 +42,7 @@ An image does not exist locally with the tag: <dockerNamespace>/getting-started-
 1. In the terminal, start the app! `docker run -dp 3000:3000 YOUR-USER-NAME/getting-started-docker`
 1. Click on the 3000 badge when it comes up and this will open a new tab with your app running! If the 3000 badge doesn't show up, you can click on the "Open Port" button and type in 3000 manually.
 
-### Persist the DB
+### <ins>Persist the DB
 #### Container Volumes
 - Containers (what we currently know):
   - When a container runs, it uses the various layers from an image for its filesystem. Each container also gets its own "scratch space" to create/update/remove files. Any changes won't be seen in another container, even if they are using the same image.
@@ -85,6 +85,49 @@ docker volume inspect todo-db
 ```
 The `Mountpoint` is the actual location on the disk where the data is stored. Note that on most machines, you will need to have root access to this directory from the host. But that's where it is!
 
+### <ins>Use bind mounts
+Named volumes are great if we simply want to store data, as we don't have to worry about *where* the data is stored. With **bind mounts**, we control the exact mountpoint on the host. We can use this to persist data, but it's often used to provide addtional data into containers. When working on an application, we can use a bind mount to mount our source code into the container to let it see code changes, respond, and let us see the changes right away. For Node-based applications, nodemon is a great tool to watch for file changes and then restart the application. There are equivalent tools in most other languages and frameworks.
+
+Bind mounts and named volumes are the two main types of volumes that come with the Docker engine. However, additional volume drivers are available to support other use cases (SFTP, Ceph, NetApp, S3, and more).
+
+#### Start a dev-mode container
+To run our container to support a development workflow, we will do the following:
+  - Mount our source code into the container
+  - Install all dependencies, including the "dev" dependencies
+  - Start nodemon to watch for filesystem changes
+
+Let's do it:
+1. Make sure you don't have any previous `getting-started-docker` containers running. If you do, run `docker rm -f <container id>`.
+1. cd into `/app` directory: `cd /app`. Run the following command:
+```
+docker run -dp 3000:3000 \
+    -w /app -v "$(pwd):/app" \
+    node:12-alpine \
+    sh -c "yarn install && yarn run dev"
+```
+  - `-dp 3000:3000`: Run in detached (background) mode and create a port mapping
+  - `-w /app`: Sets the "working directory" or the current directory that the command will run from
+  - `-v "$(pwd):/app"`: Bind mount the current directory from the host in the container into the `/app` directory
+  - `node:12-alpine`: The image to use. Note that this is the base image for our app from the Dockerfile
+  - `sh -c "yarn install && yarn run dev"`: Start a shell use `sh` (alpine doesn't have bash) and run `yarn install` to install *all* dependencies and then run `yarn run dev`. If we look at `package.json`, we'll see that the `dev` script is starting `nodemon`.
+3. You can watch the logs using `docker logs -f <container-id>`. You'll know you're ready to go when you see this:
+```
+docker logs -f <container-id>
+$ nodemon src/index.js
+[nodemon] 1.19.2
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching dir(s): *.*
+[nodemon] starting `node src/index.js`
+Using sqlite database at /etc/todos/todo.db
+Listening on port 3000
+```
+When you're done watching the logs, exit out by hitting `Ctrl + C`.
+
+4. Let's make a change to the app. In the `src/static/js/app.js` file, let's change the "Add Item" button to simply say "Add" (see line 109).
+1. Simply refresh the page (or open it) and you should see the change reflected in the browser almost immediately. It might take a few seconds for the Node server to restart, so if you get an error try refreshing after a few seconds.
+1. Feel free to make any other changes you'd like to make. When you're done, stop the container and build your new image using `docker build -t getting-started-docker .`.
+
+Using bind mounts is *very* common for local development setups. The advantage is that the dev machine doesn't need to have all the build tools and environments installed. With a single `docker run` command, the dev environment is pulled and ready to go. 
 
 
 ## Helpful commands
