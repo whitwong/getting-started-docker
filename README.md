@@ -43,12 +43,56 @@ An image does not exist locally with the tag: <dockerNamespace>/getting-started-
 1. Click on the 3000 badge when it comes up and this will open a new tab with your app running! If the 3000 badge doesn't show up, you can click on the "Open Port" button and type in 3000 manually.
 
 ### Persist the DB
+#### Container Volumes
+- Containers (what we currently know):
+  - When a container runs, it uses the various layers from an image for its filesystem. Each container also gets its own "scratch space" to create/update/remove files. Any changes won't be seen in another container, even if they are using the same image.
+  - Each container starts from the image defintion each time it starts.
+  - While containers can create, update, and delete files, those changes are lost when the container is removed and all changes are isolated to that container. With volumes, we can change all of this.
+- Volumes:
+  - Volumes provide the ability to connect specific filesystem paths of the container back to the host machine.
+  - If a directory in the container is mounted, changes in the directory are also seen on the host machine. Therefore if we mount the same directory across container restarts, we will see the same files.
+  - There are 2 main types of volumes. We will eventually use both, but we'll start with **named volumes**.
+#### Persist the todo data
+By default (and at this stage in the example), the todo app stores its data in a SQLite Database at `/etc/todos/todo.db`. SQLite is a relational database that sotres all of the data in a single file. While this isn't the best for large-scale applications, this is great for small demos. We'll switch to a different db engine later.
+
+As mentioned before, we're going to use a **named volume**. Think of a named volume as simply a bucket of data. Docker maintains the physical location on the disk and you only need to remember the name of volume. Every time you use the volume, Docker will make sure the correct data is provided.
+
+1. Create a volume bby using the `docker volume create` command: `docker volume create todo-db`
+1. Stop the todo app container once again in the Dashboard (or with `docker rm -f <container id>`), as it's still running without using the persistent volume.
+1. Start the todo app container but add the `-v` flag to specify a volume mount. We will use the named volume and mount it to `/etc/todos`, which will capture all files created at the path. `docker run -dp 3000:3000 -v todo-db:/etc/todos getting-started-docker`
+1. Once the container starts up, open the app and add a few items to your todo list.
+1. Remove the container for the todo app. Use the Dashboard or `docker ps` to get the ID and then use `docker rm -f <container id>` to remove it.
+1. Start a new container using the same command from above: `docker run -dp 3000:3000 -v todo-db:/etc/todos getting-started-docker`
+1. Open the app. You should see you itmes still in your list!
+1. Go ahead and remove the container when you're done checking out your list. Yay, we've learned how to persist data! 🎉
+
+Note: While named, volumes and bind mounts (which we'll explore next) are the two main types of volumes supported by a default Docker engine installation, there are many volume driver plugins available to support NFS, STFP, NetApp, and more. THeis will be especially important once you start running containers on multiple hosts in a clustered environment with Swarm, Kubernetes, etc.
+#### Dive into the volume
+A frequently asked question is "Where is Docker *actually* storing my data when I use a named volume?" If you want to know, you can use the `docker volume inspect` command.
+```
+docker volume inspect todo-db
+[
+    {
+        "CreatedAt": "2019-09-26T02:18:36Z",
+        "Driver": "local",
+        "Labels": {},
+        "Mountpoint": "/var/lib/docker/volumes/todo-db/_data",
+        "Name": "todo-db",
+        "Options": {},
+        "Scope": "local"
+    }
+]
+```
+The `Mountpoint` is the actual location on the disk where the data is stored. Note that on most machines, you will need to have root access to this directory from the host. But that's where it is!
 
 
 
 ## Helpful commands
+* Build docker image: `docker build -t <image name> .`
+* Run the container: `docker run -dp 3000:3000 <image name>`
 * List docker images on machine: `docker images` or `docker image ls`
-* List docker containers/processes: `docker ps` and `docker ps -a`
+* List running docker containers/processes: `docker ps`
+* List all docker containers/processes (stopped and running): `docker ps -a`
 * Start image/container: `docker start <image name>` or `docker start <container id>`
 * Stop image/container: `docker stop <image name>` or `docker stop <container id>`
 * Delete container: `docker rm <container id>`
