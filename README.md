@@ -485,6 +485,208 @@ When you're ready to tear it all down, simply run `docker-compose down` or hit t
 
 Once torn down, you can switch to another project, run `docker-compose up` and be ready to contribute to that project! It really doesn't get much simpler than that!
 
+### <ins>Image-building best practices
+#### Security scanning
+When you've built an image, it's good practice to scan it for security vulnerabilities using the `docker scan` command. Docker partnered with `Snyk` to provide vulnerability scanning services. Try scanning `getting-started-docker` image created earlier:
+```
+docker scan getting-started-docker
+```
+The scan uses a constantly updated database of vulnerabilities, so the output you see will vary as new vulnerabilities are discovered. An example of potential vulnerabilites you may see:
+```
+✗ Low severity vulnerability found in freetype/freetype
+  Description: CVE-2020-15999
+  Info: https://snyk.io/vuln/SNYK-ALPINE310-FREETYPE-1019641
+  Introduced through: freetype/freetype@2.10.0-r0, gd/libgd@2.2.5-r2
+  From: freetype/freetype@2.10.0-r0
+  From: gd/libgd@2.2.5-r2 > freetype/freetype@2.10.0-r0
+  Fixed in: 2.10.0-r1
+
+✗ Medium severity vulnerability found in libxml2/libxml2
+  Description: Out-of-bounds Read
+  Info: https://snyk.io/vuln/SNYK-ALPINE310-LIBXML2-674791
+  Introduced through: libxml2/libxml2@2.9.9-r3, libxslt/libxslt@1.1.33-r3, nginx-module-xslt/nginx-module-xslt@1.17.9-r1
+  From: libxml2/libxml2@2.9.9-r3
+  From: libxslt/libxslt@1.1.33-r3 > libxml2/libxml2@2.9.9-r3
+  From: nginx-module-xslt/nginx-module-xslt@1.17.9-r1 > libxml2/libxml2@2.9.9-r3
+  Fixed in: 2.9.9-r4
+```
+The output lists the type of vulnerability, a URL to learn more, and importantly which version of the relevant library fixes the vulnerability.
+
+There are several other options, which you can read about in the [docker scan documentation](https://docs.docker.com/engine/scan/)
+
+As well as scanning your newly built image on the command line, you can also [configure Docker Hub](https://docs.docker.com/docker-hub/vulnerability-scanning/) to scan all newly pushed images automatically, and you can then see the results in both Docker Hub and Docker Desktop.
+
+#### Image layering
+Using `docker image history` command, you can see the command that was used to create each layer within an image.
+1. Use the `docker image history` command to see the layers in the `getting-started-docker` image you created earlier in the tutorial.
+```
+docker image history getting-started-docker
+```
+You should get output that looks something like this (dates/IDs may be different):
+```
+IMAGE          CREATED        CREATED BY                                      SIZE      COMMENT
+88d38af8721f   28 hours ago   /bin/sh -c #(nop)  CMD ["node" "src/index.js…   0B
+20e4dce56998   28 hours ago   /bin/sh -c yarn install --production            83.2MB
+0447de1d2574   28 hours ago   /bin/sh -c #(nop) COPY dir:00f42896550e119b6…   58.6MB
+e2bcfc364290   5 days ago     /bin/sh -c #(nop) WORKDIR /app                  0B
+5c6db76c80d7   12 days ago    /bin/sh -c #(nop)  CMD ["node"]                 0B
+<missing>      12 days ago    /bin/sh -c #(nop)  ENTRYPOINT ["docker-entry…   0B
+<missing>      12 days ago    /bin/sh -c #(nop) COPY file:238737301d473041…   116B
+<missing>      12 days ago    /bin/sh -c apk add --no-cache --virtual .bui…   7.62MB
+<missing>      12 days ago    /bin/sh -c #(nop)  ENV YARN_VERSION=1.22.5      0B
+<missing>      12 days ago    /bin/sh -c addgroup -g 1000 node     && addu…   75.7MB
+<missing>      12 days ago    /bin/sh -c #(nop)  ENV NODE_VERSION=12.21.0     0B
+<missing>      12 days ago    /bin/sh -c #(nop)  CMD ["/bin/sh"]              0B
+<missing>      12 days ago    /bin/sh -c #(nop) ADD file:7eeea546ecde7a036…   5.61MB
+```
+Each of the lines represents a layer in the image. The display here shows the base at the bottom with the newest layer at the top. Using this, you can also quickly see the size of each layer, helping diagnose large images.
+
+2. You'll notice that several of the lines are truncated. If you add the `--no-trunc` flag, you'll get the full output.
+```
+docker image history --no-trunc getting-started-docker
+```
+#### Layer caching
+Now that you've seen the layering in action, there's an important lesson to learn to help decrease build times for your container images. **Once a layer changes, all downstream layers have to be recreated as well.**
+
+Let's look at the Dockerfile we were using one more time:
+```
+FROM node:12-alpine
+WORKDIR /app
+COPY . .
+RUN yarn install --production
+CMD ["node", "src/index.js"]
+```
+Going back to the image history output, we see that each command in the Dockerfile becomes a new layer in the image. You might remember that when we made a change to the image, the yarn dependencies had to be reinstalled. Is there a way to fix this? It doesn't make much sense to ship around the same dependencies every time we build, right?
+
+To fix this, we need to restructure our Dockerfile to help support the caching of the dependencies. For Node-based applications, those dependencies are defined in the `package.json` file. So, what if we copied only that file in first, install the dependencies, and *then* copy in everything else? Then, we only recreate the yarn dependencies if there was a change to the package.json.
+
+1. Update the Dockerfile to copy in the `package.json` first, install dependencies, and then copy everything else in.
+```
+ FROM node:12-alpine
+ WORKDIR /app
+ COPY package.json yarn.lock ./
+ RUN yarn install --production
+ COPY . .
+ CMD ["node", "src/index.js"]
+```
+2. Create a file named `.dockerignore` in the same folder as the Dockerfile with the following contents.
+```
+node_modules
+```
+`.dockerignore` files are an easy way to selectively copy only image relevant files. You can read more about this [here](https://docs.docker.com/engine/reference/builder/#dockerignore-file). In this case, the `node_modules` folder should be omitted in the second `COPY` step because otherwise, it would possibly overwrite files which were created by the command in the `RUN` step. For further details on why this is recommended for Node.js applications and other best practices, have a look at their guide on [Dockerizing a Node.js web app](https://nodejs.org/en/docs/guides/nodejs-docker-webapp/).
+
+3. Build a new image using `docker build`.
+```
+docker build -t getting-started-docker .
+```
+You should see output like this:
+```
+Sending build context to Docker daemon  4.661MB
+Step 1/6 : FROM node:12-alpine
+ ---> 5c6db76c80d7
+Step 2/6 : WORKDIR /app
+ ---> Using cache
+ ---> e2bcfc364290
+Step 3/6 : COPY package.json yarn.lock ./
+ ---> fff01845f82e
+Step 4/6 : RUN yarn install --production
+ ---> Running in e25fbcb8a990
+yarn install v1.22.5
+[1/4] Resolving packages...
+[2/4] Fetching packages...
+info fsevents@1.2.9: The platform "linux" is incompatible with this module.
+info "fsevents@1.2.9" is an optional dependency and failed compatibility check. Excluding it from installation.
+[3/4] Linking dependencies...
+[4/4] Building fresh packages...
+Done in 14.91s.
+Removing intermediate container e25fbcb8a990
+ ---> 6f2366bb9ece
+Step 5/6 : COPY . .
+ ---> 84128784bf27
+Step 6/6 : CMD ["node", "src/index.js"]c
+ ---> Running in aa80605eff79
+Removing intermediate container aa80605eff79
+ ---> 126dbbd0703c
+Successfully built 126dbbd0703c
+Successfully tagged getting-started-docker:latest
+```
+You'll see that all layers were rebuilt. Perfectly fine since we canged the Dockerfile quite a bit.
+
+4. Now, make a change to the `src/static/index.html` file (like change the `<title>` to say "The Awesome Todo App").
+
+5. Build the Docker iamge now using `docker build -t getting-started-docker .` again. This time you output should look a little different.
+```
+Sending build context to Docker daemon  4.661MB
+Step 1/6 : FROM node:12-alpine
+ ---> 5c6db76c80d7
+Step 2/6 : WORKDIR /app
+ ---> Using cache
+ ---> e2bcfc364290
+Step 3/6 : COPY package.json yarn.lock ./
+ ---> Using cache
+ ---> fff01845f82e
+Step 4/6 : RUN yarn install --production
+ ---> Using cache
+ ---> 6f2366bb9ece
+Step 5/6 : COPY . .
+ ---> 2ffeb8b4116c
+Step 6/6 : CMD ["node", "src/index.js"]c
+ ---> Running in 7fbf8a49a386
+Removing intermediate container 7fbf8a49a386
+ ---> 4dd27e105b4d
+Successfully built 4dd27e105b4d
+Successfully tagged getting-started-docker:latest
+```
+First off, you should notice that the build was MUCH faster! And you'll see that steps 1-4 all have `Using cache`. So hooray! We're using the build cache. Pushing and pulling this image and updates to it will be much faster as well. Yay!
+
+#### Multi-stage builds (examples below)
+While we're not going to dive into it too much in this tutorial, multi-stage builds are an incredibly powerful tool to help use multiple stages to create an image. There are several advantages for them:
+* Separate build-time dependencies from runtime dependencies
+* Reduce overall image size by shipping *only* what your app needs to run
+
+1. Maven/Tomcat example
+
+When building Java-based applications, a JDK is needed to compile the source code to Java bytecode. However, that JDK isn't needed in production. Also, you might be using tools like Maven or Gradle to help build the app. Those also aren't needed in our final image. Multi-stage builds help.
+```
+FROM maven AS build
+WORKDIR /app
+COPY . .
+RUN mvn package
+
+FROM tomcat
+COPY --from=build /app/target/file.war /usr/local/tomcat/webapps
+``` 
+In this example, we use one stage (called `build`) to perform the actual Java build using Maven. In the second stage (starting at `FROM tomcat`), we copy in files from the `build` stage. The final image is only the last stage being created (which can be overridden using the `--target` flag).
+
+2. React example
+
+When building React applications, we need a Node environment to compile the JS code (typically JSX), SASS stylesheets, and more into static HTML, JS, and CSS. If we aren't doing server-side rendering, we don't even need a Node environment for our production build. Why not ship the static resources in a static nginx container?
+```
+FROM node:12 AS build
+WORKDIR /app
+COPY package* yarn.lock ./
+RUN yarn install
+COPY public ./public
+COPY src ./src
+RUN yarn run build
+
+FROM nginx:alpine
+COPY --from=build /app/build /usr/share/nginx/html
+```
+Here, we are using a `node:12` image to perform the build (maximizing layer caching) and then copying the output into an nginx container. Pretty neat!
+
+### What next?
+Although we're done with this workshop, there's still a LOT mroe to learn about containers! A few other areas to look at next are:
+
+#### Container orchestration
+Running containers in production is tough. You don’t want to log into a machine and simply run a `docker run` or `docker-compose up`. Why not? Well, what happens if the containers die? How do you scale across several machines? Container orchestration solves this problem. Tools like Kubernetes, Swarm, Nomad, and ECS all help solve this problem, all in slightly different ways.
+
+The general idea is that you have “managers” who receive **expected state**. This state might be “I want to run two instances of my web app and expose port 80.” The managers then look at all of the machines in the cluster and delegate work to “worker” nodes. The managers watch for changes (such as a container quitting) and then work to make **actual state** reflect the expected state.
+
+#### Cloud Native Computing Foundation projects
+The CNCF is a vendor-neutral home for various open-source projects, including Kubernetes, Prometheus, Envoy, Linkerd, NATS, and more! You can view the [graduated and incubated projects here](https://www.cncf.io/projects/) and the entire [CNCF Landscape here](https://landscape.cncf.io/). There are a LOT of projects to help solve problems around monitoring, logging, security, image registries, messaging, and more!
+
+
 ## Helpful commands
 * Build docker image: `docker build -t <image name> .`
 * Run the container: `docker run -dp 3000:3000 <image name>`
